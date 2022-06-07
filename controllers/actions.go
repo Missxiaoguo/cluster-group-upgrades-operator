@@ -60,7 +60,7 @@ func (r *ClusterGroupUpgradeReconciler) takeActionsAfterCompletion(
 
 	// Cleanup resources
 	if actionsAfterCompletion.DeleteObjects == nil || *actionsAfterCompletion.DeleteObjects {
-		err := r.deleteResources(ctx, clusterGroupUpgrade)
+		err := r.deleteResourcesByName(ctx, clusterGroupUpgrade)
 		if err != nil {
 			return err
 		}
@@ -173,5 +173,39 @@ func (r *ClusterGroupUpgradeReconciler) deleteResources(
 		return fmt.Errorf("failed to delete MultiCloud objects for CGU %s: %v", clusterGroupUpgrade.Name, err)
 	}
 	clusterGroupUpgrade.Status.SafeResourceNames = nil
+	return nil
+}
+
+func (r *ClusterGroupUpgradeReconciler) deleteResourcesByName(
+	ctx context.Context, clusterGroupUpgrade *ranv1alpha1.ClusterGroupUpgrade) error {
+	for _, pr := range clusterGroupUpgrade.Status.PlacementBindings {
+		err := utils.DeletePlacementRuleByName(ctx, r.Client, pr.Name, pr.Namespace)
+		if err != nil {
+			return fmt.Errorf("failed to delete PlacementRules for CGU %s: %v", clusterGroupUpgrade.Name, err)
+		}
+	}
+
+	for _, pb := range clusterGroupUpgrade.Status.PlacementBindings {
+		err := utils.DeletePlacementBindingByName(ctx, r.Client, pb.Name, pb.Namespace)
+		if err != nil {
+			return fmt.Errorf("failed to delete PlacementBindings for CGU %s: %v", clusterGroupUpgrade.Name, err)
+		}
+	}
+
+	for _, policy := range clusterGroupUpgrade.Status.CopiedPolicies {
+		err := utils.DeletePolicyByName(ctx, r.Client, policy.Name, policy.Namespace)
+		if err != nil {
+			return fmt.Errorf("failed to delete Policies for CGU %s: %v", clusterGroupUpgrade.Name, err)
+		}
+	}
+
+	clusters, err := r.getAllClustersForUpgrade(ctx, clusterGroupUpgrade)
+	if err != nil {
+		return fmt.Errorf("cannot obtain all the details about the clusters in the CR: %s", err)
+	}
+	err = utils.DeleteMultiCloudObjects(ctx, r.Client, clusterGroupUpgrade, clusters)
+	if err != nil {
+		return fmt.Errorf("failed to delete MultiCloud objects for CGU %s: %v", clusterGroupUpgrade.Name, err)
+	}
 	return nil
 }

@@ -30,6 +30,16 @@ func GetMinOf3(number1, number2, number3 int) int {
 	}
 }
 
+// FindInSlice looks for an element in the given string slice and returns bool
+func FindInSlice(slice []string, search string) bool {
+	for _, item := range slice {
+		if item == search {
+			return true
+		}
+	}
+	return false
+}
+
 // GetSafeResourceName returns the safename if already allocated in the map and creates a new one if not
 func GetSafeResourceName(name string, clusterGroupUpgrade *ranv1alpha1.ClusterGroupUpgrade, maxLength, spareLength int) string {
 	if clusterGroupUpgrade.Status.SafeResourceNames == nil {

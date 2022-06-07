@@ -255,7 +255,13 @@ spec:
                 type: array
               copiedPolicies:
                 items:
-                  type: string
+                  description: Resource contains the necessary information of a resource
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  type: object
                 type: array
               managedPoliciesCompliantBeforeUpgrade:
                 items:
@@ -287,11 +293,23 @@ spec:
                   of cluster Important: Run "make" to regenerate code after modifying
                   this file'
                 items:
-                  type: string
+                  description: Resource contains the necessary information of a resource
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  type: object
                 type: array
               placementRules:
                 items:
-                  type: string
+                  description: Resource contains the necessary information of a resource
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+                  type: object
                 type: array
               precaching:
                 description: PrecachingStatus defines the observed pre-caching status

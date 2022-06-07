@@ -6,6 +6,8 @@ import (
 
 	policiesv1 "github.com/open-cluster-management/governance-policy-propagator/api/v1"
 	ranv1alpha1 "github.com/openshift-kni/cluster-group-upgrades-operator/api/v1alpha1"
+	"k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -99,10 +101,80 @@ func DeletePlacementRules(ctx context.Context, c client.Client, ns string, label
 			return err
 		}
 	}
+
+	/*
+		// delete from all namespaces
+		deleteAllOpts := []client.DeleteAllOfOption{
+			client.MatchingLabels(labels),
+		}
+		placementRule := &unstructured.Unstructured{}
+		placementRule.SetGroupVersionKind(schema.GroupVersionKind{
+			Group:   "apps.open-cluster-management.io",
+			Kind:    "PlacementRule",
+			Version: "v1",
+		})
+		if err := c.DeleteAllOf(ctx, placementRule, deleteAllOpts...); err != nil {
+			return err
+		}
+	*/
 	return nil
 }
 
 // GetResourceName constructs composite names for policy objects
 func GetResourceName(clusterGroupUpgrade *ranv1alpha1.ClusterGroupUpgrade, initialString string) string {
 	return strings.ToLower(clusterGroupUpgrade.Name + "-" + initialString)
+}
+
+// DeletePolicy deletes one policy
+func DeletePolicyByName(ctx context.Context, c client.Client, name string, namespace string) error {
+	policy := &policiesv1.Policy{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+	}
+	if err := c.Delete(ctx, policy); err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// DeletePlacementRuleByName deletes one placementrule
+func DeletePlacementRuleByName(ctx context.Context, c client.Client, name string, namespace string) error {
+	placementRule := &unstructured.Unstructured{}
+	placementRule.SetName(name)
+	placementRule.SetNamespace(namespace)
+	placementRule.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "apps.open-cluster-management.io",
+		Kind:    "PlacementRule",
+		Version: "v1",
+	})
+
+	if err := c.Delete(ctx, placementRule); err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// DeletePlacementBindingByName deletes one placementbinding
+func DeletePlacementBindingByName(ctx context.Context, c client.Client, name string, namespace string) error {
+	placementBinding := &policiesv1.PlacementBinding{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: namespace,
+		},
+	}
+	if err := c.Delete(ctx, placementBinding); err != nil {
+		if !errors.IsNotFound(err) {
+			return err
+		}
+	}
+
+	return nil
 }

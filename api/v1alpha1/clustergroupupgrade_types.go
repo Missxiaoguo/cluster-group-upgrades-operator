@@ -155,6 +155,12 @@ type ManagedPolicyForUpgrade struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
+// Resource contains the necessary information of a resource
+type Resource struct {
+	Name      string `json:"name,omitempty"`
+	Namespace string `json:"namespace,omitempty"`
+}
+
 // PrecachingSpec defines the pre-caching software spec derived from policies
 type PrecachingSpec struct {
 	PlatformImage                string   `json:"platformImage,omitempty"`
@@ -187,11 +193,11 @@ type ClusterGroupUpgradeStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 	// +operator-sdk:csv:customresourcedefinitions:type=status,displayName="Placement Bindings"
-	PlacementBindings []string `json:"placementBindings,omitempty"`
+	PlacementBindings []Resource `json:"placementBindings,omitempty"`
 	// +operator-sdk:csv:customresourcedefinitions:type=status,displayName="Placement Rules"
-	PlacementRules []string `json:"placementRules,omitempty"`
+	PlacementRules []Resource `json:"placementRules,omitempty"`
 	// +operator-sdk:csv:customresourcedefinitions:type=status,displayName="Copied Policies"
-	CopiedPolicies []string `json:"copiedPolicies,omitempty"`
+	CopiedPolicies []Resource `json:"copiedPolicies,omitempty"`
 	// +operator-sdk:csv:customresourcedefinitions:type=status,displayName="Conditions"
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 	// +operator-sdk:csv:customresourcedefinitions:type=status,displayName="Remediation Plan"
