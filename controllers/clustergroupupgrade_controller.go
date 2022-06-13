@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -895,6 +896,9 @@ func (r *ClusterGroupUpgradeReconciler) copyManagedInformPolicy(
 	specObject := newPolicy.Object["spec"].(map[string]interface{})
 	specObject["remediationAction"] = utils.RemediationActionEnforce
 
+	objectDef := specObject["policy-templates"].([]interface{})[0]
+	r.Log.Info("ANGIE: objectDef", "content", objectDef)
+
 	// Create the new policy in the desired namespace.
 	err = r.createNewPolicyFromStructure(ctx, clusterGroupUpgrade, newPolicy)
 	if err != nil {
@@ -1039,7 +1043,7 @@ func (r *ClusterGroupUpgradeReconciler) getPolicyContent(
 				r.Log.Info(
 					"[getPolicyContent] Policy spec.policy-templates.objectDefinition.spec.object-templates.kind is not of Subscription kind",
 					"policyName", managedPolicyName)
-				continue
+				//continue
 			}
 
 			// If name is missing, log and skip. We need Subscription name in order to have a valid content for
@@ -1060,6 +1064,13 @@ func (r *ClusterGroupUpgradeReconciler) getPolicyContent(
 					"[getPolicyContent] Policy is missing its spec.policy-templates.objectDefinition.spec.object-templates.metadata.namespace",
 					"policyName", managedPolicyName)
 				continue
+			}
+
+			specContent, ok := innerObjectDefinitionContent["spec"].(string)
+			if !ok {
+				r.Log.Info("ANGIE: policy has no spec")
+			} else {
+				r.Log.Info("ANGIE: policy's spec ", "content", specContent, "type", reflect.TypeOf(specContent))
 			}
 
 			// Save the info into the policy content status.
