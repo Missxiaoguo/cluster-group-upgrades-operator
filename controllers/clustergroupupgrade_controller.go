@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 
@@ -896,9 +895,10 @@ func (r *ClusterGroupUpgradeReconciler) copyManagedInformPolicy(
 	specObject := newPolicy.Object["spec"].(map[string]interface{})
 	specObject["remediationAction"] = utils.RemediationActionEnforce
 
-	objectDef := specObject["policy-templates"].([]interface{})[0]
-	r.Log.Info("ANGIE: objectDef", "content", objectDef)
-
+	err = r.ensureHubTemplateResources(ctx, clusterGroupUpgrade, managedPolicy)
+	if err != nil {
+		return "", err
+	}
 	// Create the new policy in the desired namespace.
 	err = r.createNewPolicyFromStructure(ctx, clusterGroupUpgrade, newPolicy)
 	if err != nil {
@@ -906,6 +906,99 @@ func (r *ClusterGroupUpgradeReconciler) copyManagedInformPolicy(
 		return "", err
 	}
 	return newPolicy.GetName(), nil
+}
+
+func (r *ClusterGroupUpgradeReconciler) ensureHubTemplateResources(
+	ctx context.Context, clusterGroupUpgrade *ranv1alpha1.ClusterGroupUpgrade, managedPolicy *unstructured.Unstructured) error {
+
+	managedPolicyName := managedPolicy.GetName()
+	specObject := managedPolicy.Object["spec"].(map[string]interface{})
+
+	// Get the policy templates.
+	policyTemplates := specObject["policy-templates"]
+	policyTemplatesArr := policyTemplates.([]interface{})
+
+	// Go through the template array.
+	for _, template := range policyTemplatesArr {
+		// Get to the metadata name of the ConfigurationPolicy.
+		objectDefinition := template.(map[string]interface{})["objectDefinition"]
+		if objectDefinition == nil {
+			return fmt.Errorf("policy %s is missing its spec.policy-templates.objectDefinition", managedPolicyName)
+		}
+		objectDefinitionContent := objectDefinition.(map[string]interface{})
+
+		// Get the spec.
+		spec := objectDefinitionContent["spec"]
+		if spec == nil {
+			return fmt.Errorf("policy %s is missing its spec.policy-templates.objectDefinition.spec", managedPolicyName)
+		}
+
+		// Get the object-templates from the spec.
+		specContent := spec.(map[string]interface{})
+		objectTemplates := specContent["object-templates"]
+		if objectTemplates == nil {
+			return fmt.Errorf("policy %s is missing its spec.policy-templates.objectDefinition.spec.object-templates", managedPolicyName)
+		}
+
+		objectTemplatesContent := objectTemplates.([]interface{})
+		for _, objectTemplate := range objectTemplatesContent {
+			objectTemplateContent := objectTemplate.(map[string]interface{})
+			innerObjectDefinition := objectTemplateContent["objectDefinition"]
+			if innerObjectDefinition == nil {
+				return fmt.Errorf("policy %s is missing its spec.policy-templates.objectDefinition.spec.object-templates.objectDefinition", managedPolicyName)
+			}
+
+			innerObjectDefinitionJSON, err := json.Marshal(innerObjectDefinition)
+			if err != nil {
+				return fmt.Errorf("Could not marshal data: %s", err)
+			}
+
+			r.Log.Info("ANGIE: objectDefinition json string", "content", string(innerObjectDefinitionJSON))
+
+			// check if the object definition has a hub template and process only if there's a template pattern "{{hub" in it
+			if strings.Contains(string(innerObjectDefinitionJSON), "{{hub") {
+				r.Log.Info("ANGIE: processing hub template")
+
+				tmplResolver := &TemplateResolver{
+					Ctx:             ctx,
+					CguR:            r,
+					Cgu:             clusterGroupUpgrade,
+					LookupNamespace: managedPolicy.GetNamespace(),
+				}
+
+				//var tmplContextList []struct{}
+				if strings.Contains(string(innerObjectDefinitionJSON), ".ManagedClusterName") {
+					clusters, err := r.getAllClustersForUpgrade(ctx, clusterGroupUpgrade)
+					if err != nil {
+						return err
+					}
+
+					for _, c := range clusters {
+						tmplContext := struct {
+							ManagedClusterName string
+						}{
+							ManagedClusterName: c,
+						}
+
+						err = tmplResolver.ResolveTemplate(innerObjectDefinitionJSON, tmplContext)
+						if err != nil {
+							r.Log.Error(err, "ANGIE: resolve template err")
+							return err
+						}
+					}
+
+				} else {
+					err = tmplResolver.ResolveTemplate(innerObjectDefinitionJSON, struct{}{})
+					if err != nil {
+						r.Log.Error(err, "ANGIE: resolve template err")
+						return err
+					}
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func (r *ClusterGroupUpgradeReconciler) updateConfigurationPolicyNameForCopiedPolicy(
@@ -1043,7 +1136,7 @@ func (r *ClusterGroupUpgradeReconciler) getPolicyContent(
 				r.Log.Info(
 					"[getPolicyContent] Policy spec.policy-templates.objectDefinition.spec.object-templates.kind is not of Subscription kind",
 					"policyName", managedPolicyName)
-				//continue
+				continue
 			}
 
 			// If name is missing, log and skip. We need Subscription name in order to have a valid content for
@@ -1064,13 +1157,6 @@ func (r *ClusterGroupUpgradeReconciler) getPolicyContent(
 					"[getPolicyContent] Policy is missing its spec.policy-templates.objectDefinition.spec.object-templates.metadata.namespace",
 					"policyName", managedPolicyName)
 				continue
-			}
-
-			specContent, ok := innerObjectDefinitionContent["spec"].(string)
-			if !ok {
-				r.Log.Info("ANGIE: policy has no spec")
-			} else {
-				r.Log.Info("ANGIE: policy's spec ", "content", specContent, "type", reflect.TypeOf(specContent))
 			}
 
 			// Save the info into the policy content status.
