@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -892,6 +893,12 @@ func (r *ClusterGroupUpgradeReconciler) copyManagedInformPolicy(
 		return "", err
 	}
 
+	//TODO: copy the policy only when there's no hub templates error(check child policy annotation policy.open-cluster-management.io/hub-templates-error)
+	err = r.ensureHubTemplateResources(ctx, clusterGroupUpgrade, newPolicy, managedPolicy.GetNamespace())
+	if err != nil {
+		return "", err
+	}
+
 	specObject := newPolicy.Object["spec"].(map[string]interface{})
 	specObject["remediationAction"] = utils.RemediationActionEnforce
 
@@ -902,6 +909,76 @@ func (r *ClusterGroupUpgradeReconciler) copyManagedInformPolicy(
 		return "", err
 	}
 	return newPolicy.GetName(), nil
+}
+
+func (r *ClusterGroupUpgradeReconciler) ensureHubTemplateResources(
+	ctx context.Context, clusterGroupUpgrade *ranv1alpha1.ClusterGroupUpgrade, policy *unstructured.Unstructured, managedPolicyNamespace string) error {
+
+	policyName := policy.GetName()
+	specObject := policy.Object["spec"].(map[string]interface{})
+
+	// Get the policy templates.
+	policyTemplates := specObject["policy-templates"]
+	policyTemplatesArr := policyTemplates.([]interface{})
+
+	// Go through the template array.
+	for _, template := range policyTemplatesArr {
+		// Get to the metadata name of the ConfigurationPolicy.
+		objectDefinition := template.(map[string]interface{})["objectDefinition"]
+		if objectDefinition == nil {
+			return fmt.Errorf("policy %s is missing its spec.policy-templates.objectDefinition", policyName)
+		}
+		objectDefinitionContent := objectDefinition.(map[string]interface{})
+
+		// Get the spec.
+		spec := objectDefinitionContent["spec"]
+		if spec == nil {
+			return fmt.Errorf("policy %s is missing its spec.policy-templates.objectDefinition.spec", policyName)
+		}
+
+		// Get the object-templates from the spec.
+		specContent := spec.(map[string]interface{})
+		objectTemplates := specContent["object-templates"]
+		if objectTemplates == nil {
+			return fmt.Errorf("policy %s is missing its spec.policy-templates.objectDefinition.spec.object-templates", policyName)
+		}
+
+		objectTemplatesContent := objectTemplates.([]interface{})
+		for _, objectTemplate := range objectTemplatesContent {
+			objectTemplateContent := objectTemplate.(map[string]interface{})
+			innerObjectDefinition := objectTemplateContent["objectDefinition"]
+			if innerObjectDefinition == nil {
+				return fmt.Errorf("policy %s is missing its spec.policy-templates.objectDefinition.spec.object-templates.objectDefinition", policyName)
+			}
+
+			innerObjectDefinitionYAML, err := yaml.Marshal(innerObjectDefinition)
+			if err != nil {
+				return fmt.Errorf("Could not marshal data: %s", err)
+			}
+
+			// check if the object definition has a hub template and process only if there's a template pattern "{{hub" in it
+			if strings.Contains(string(innerObjectDefinitionYAML), "{{hub") {
+				if managedPolicyNamespace == clusterGroupUpgrade.GetNamespace() {
+					return nil
+				}
+
+				tmplResolver := &utils.TemplateResolver{
+					Client:          r.Client,
+					Log:             r.Log,
+					Ctx:             ctx,
+					TargetNamespace: clusterGroupUpgrade.GetNamespace(),
+					LookupNamespace: managedPolicyNamespace,
+				}
+
+				_, err = tmplResolver.ResolveHubTemplate(innerObjectDefinition)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+
+	return nil
 }
 
 func (r *ClusterGroupUpgradeReconciler) updateConfigurationPolicyNameForCopiedPolicy(
