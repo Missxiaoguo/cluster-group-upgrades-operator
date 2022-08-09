@@ -40,7 +40,8 @@ nodes:
 As an alternative way, a recovery partition can also be created at install time by defining an extra-manifest MachineConfig, as described here:<br>
 <https://github.com/openshift-kni/cnf-features-deploy/blob/master/ztp/gitops-subscriptions/argocd/README.md#deploying-a-site>
 
-The following extra-manifest MachineConfig will create a 50G partition on the specified disk:
+The following extra-manifest MachineConfig example will create a 50G partition on the specified secondary disk:
+<br>(NOTE: If using root disk for recovery partition, do not set `wipeTable: true`)
 
 ```yaml
 apiVersion: machineconfiguration.openshift.io/v1
@@ -57,7 +58,7 @@ spec:
       disks:
         # Use persistent disk path for device, as /dev/sd* names can change
         - device: /dev/disk/by-path/pci-0000:18:00.0-scsi-0:2:1:0
-          wipeTable: true # Wipe the disk
+          wipeTable: true # Wipe the disk. WARNING: Do not set if using root disk
           partitions:
           - label: recovery
             startMiB: 1 # Optional
@@ -120,6 +121,8 @@ The backup workload generates an utility called `upgrade-recovery.sh` in the rec
 
 ## Recovery from Upgrade Failure
 
+In case, the upgrade failed in a spoke cluster, the TALO CR needs to be deleted in the hub cluster and an admin needs to login to the spoke cluster to start the recovery process.
+
 ### Platform Rollback
 
 Platform rollback, if needed, is handled by issuing the `rpm-ostree rollback -r` command. Not all upgrades will include
@@ -138,9 +141,9 @@ When the backup was taken, the active deployment was pinned and standby deployme
 
 The upgrade recovery utility is generated when taking the backup, before the upgrade starts, written as `/var/recovery/upgrade-recovery.sh`.
 
-* The first phase of the recovery shuts down containers and cleans up, and restore files from the backup partition/folder to the targeted directories. Afterwards, it prompts for a rebooting the node with `systemctl reboot`.
+* To start the recovery, you have to launch the script. The first phase of the recovery shuts down containers and cleans up, and restore files from the backup partition/folder to the targeted directories. Afterwards, it prompts for a rebooting the node with `systemctl reboot`.
 
-* The second stage restores cluster database and related files from the backup, relaunches containers and trigger required redeployments as per cluster restore procedure.
+* After the reboot, the script needs to be relaunched again with the resume option, i.e. `/var/recovery/upgrade-recovery.sh --resume`. This will restore cluster database and related files from the backup, will relaunch containers and trigger required redeployments as per cluster restore procedure.
 
 
 > **WARNING**: Should the recovery utility fail, the user can retry with the `--restart` option:<br>
