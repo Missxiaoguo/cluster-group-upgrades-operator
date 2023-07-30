@@ -74,6 +74,24 @@ func DeletePolicies(ctx context.Context, c client.Client, ns string, labels map[
 	return nil
 }
 
+// func DeletePlacementBindings(ctx context.Context, c client.Client, ns string, labels map[string]string) error {
+// 	listOpts := []client.ListOption{
+// 		client.InNamespace(ns),
+// 		client.MatchingLabels(labels),
+// 	}
+// 	placementBindingsList := &policiesv1.PlacementBindingList{}
+// 	if err := c.List(ctx, placementBindingsList, listOpts...); err != nil {
+// 		return err
+// 	}
+//
+// 	for _, placementBinding := range placementBindingsList.Items {
+// 		if err := c.Delete(ctx, &placementBinding); err != nil {
+// 			return err
+// 		}
+// 	}
+// 	return nil
+// }
+
 // DeletePlacementBindings deletes PlacementBindings
 func DeletePlacementBindings(ctx context.Context, c client.Client, ns string, labels map[string]string) error {
 	listOpts := []client.ListOption{
@@ -92,6 +110,24 @@ func DeletePlacementBindings(ctx context.Context, c client.Client, ns string, la
 	}
 	return nil
 }
+
+//func DeletePlacementRules(ctx context.Context, c client.Client, ns string, labels map[string]string) error {
+//	deleteAllOpts := []client.DeleteAllOfOption{
+//		client.InNamespace(ns),
+//		client.MatchingLabels(labels),
+//	}
+//
+//	placementRule := &unstructured.Unstructured{}
+//	placementRule.SetGroupVersionKind(schema.GroupVersionKind{
+//		Group:   "apps.open-cluster-management.io",
+//		Kind:    "PlacementRule",
+//		Version: "v1",
+//	})
+//	if err := c.DeleteAllOf(ctx, placementRule, deleteAllOpts...); err != nil {
+//		return err
+//	}
+//	return nil
+//}
 
 // DeletePlacementRules deletes PlacementRules
 func DeletePlacementRules(ctx context.Context, c client.Client, ns string, labels map[string]string) error {
@@ -183,11 +219,6 @@ func InspectPolicyObjects(policy *unstructured.Unstructured) (bool, error) {
 			}
 		}
 
-		// Make sure hub template functions are valid if exist
-		err := VerifyHubTemplateFunctions(configPlcTmpls, policyName)
-		if err != nil {
-			return containsStatus, err
-		}
 	}
 	return containsStatus, nil
 }
