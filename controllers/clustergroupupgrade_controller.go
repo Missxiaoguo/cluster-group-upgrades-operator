@@ -43,11 +43,15 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/event"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	ranv1alpha1 "github.com/openshift-kni/cluster-group-upgrades-operator/api/v1alpha1"
 	utils "github.com/openshift-kni/cluster-group-upgrades-operator/controllers/utils"
 	clusterv1 "open-cluster-management.io/api/cluster/v1"
+	policiesv1 "open-cluster-management.io/governance-policy-propagator/api/v1"
 )
 
 // ClusterGroupUpgradeReconciler reconciles a ClusterGroupUpgrade object
@@ -2105,6 +2109,59 @@ func (r *ClusterGroupUpgradeReconciler) getCGUControllerWorkerCount() (count int
 	return
 }
 
+func (r *ClusterGroupUpgradeReconciler) childPolicyMapper(childPolicy client.Object) []reconcile.Request {
+	r.Log.Info("TEST childPolicyMapper", "policy", childPolicy.GetName(), "status", childPolicy.(*policiesv1.Policy).Status.ComplianceState)
+
+	reqs := make([]reconcile.Request, 0)
+	//if _, ok := policy.GetLabels()["policy.open-cluster-management.io/cluster-name"]; !ok {
+	//	// unexpected: missing cluster label
+	//	r.Log.Info("TEST childPolicyMapper: skip policy")
+	//	return reqs
+	//}
+
+	parentPolicyNameArr, err := utils.GetParentPolicyNameAndNamespace(childPolicy.GetName())
+	if err != nil {
+		return reqs
+	}
+	parentPolicyName := parentPolicyNameArr[1]
+
+	// List CGUs
+	cgus := &ranv1alpha1.ClusterGroupUpgradeList{}
+	err = r.Client.List(context.TODO(), cgus)
+	if err != nil {
+		return reqs
+	}
+
+	for _, cgu := range cgus.Items {
+		// It's not a managed policy in this cgu, continue searching in rest of cgus
+		if _, ok := utils.FindStringInSlice(cgu.Spec.ManagedPolicies, parentPolicyName); !ok {
+			continue
+		}
+
+		// Get clusters for upgrade from this CGU
+		clusters, err := r.getAllClustersForUpgrade(context.TODO(), &cgu)
+		if err != nil {
+			return reqs
+		}
+
+		targetCluster := childPolicy.GetNamespace()
+		if _, ok := utils.FindStringInSlice(clusters, targetCluster); ok {
+			// the target cluster in the child policy found in this CGU
+			// enqueue this CGU
+			req := reconcile.Request{
+				NamespacedName: types.NamespacedName{
+					Name:      cgu.GetName(),
+					Namespace: cgu.GetNamespace(),
+				}}
+			reqs = append(reqs, req)
+			//r.Log.Info("TEST childPolicyMapper", "req", req)
+		}
+	}
+
+	return reqs
+
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ClusterGroupUpgradeReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	r.Recorder = mgr.GetEventRecorderFor("ClusterGroupUpgrade")
@@ -2144,19 +2201,32 @@ func (r *ClusterGroupUpgradeReconciler) SetupWithManager(mgr ctrl.Manager) error
 			GenericFunc: func(ge event.GenericEvent) bool { return false },
 			DeleteFunc:  func(de event.DeleteEvent) bool { return false },
 		})).
-		Owns(policyUnstructured, builder.WithPredicates(predicate.Funcs{
-			UpdateFunc: func(e event.UpdateEvent) bool {
-				// Generation is only updated on spec changes (also on deletion),
-				// not metadata or status
-				oldGeneration := e.ObjectOld.GetGeneration()
-				newGeneration := e.ObjectNew.GetGeneration()
-				// status update only for parent policies
-				return oldGeneration == newGeneration
-			},
-			CreateFunc:  func(ce event.CreateEvent) bool { return false },
-			GenericFunc: func(ge event.GenericEvent) bool { return false },
-			DeleteFunc:  func(de event.DeleteEvent) bool { return false },
-		})).
+		Watches(
+			&source.Kind{Type: &policiesv1.Policy{}},
+			handler.EnqueueRequestsFromMapFunc(r.childPolicyMapper),
+			builder.WithPredicates(predicate.Funcs{
+				UpdateFunc: func(e event.UpdateEvent) bool {
+					// Monitor child policy status update
+					if _, ok := e.ObjectNew.GetLabels()[utils.ChildPolicyLabel]; !ok {
+						//r.Log.Info("Update Predicates ....., root policy skipping")
+						return false
+					}
+
+					// compliant status update
+					oldPolicy := e.ObjectOld.(*policiesv1.Policy)
+					newPolicy := e.ObjectNew.(*policiesv1.Policy)
+
+					// Child Policy compliant status update only
+					if e.ObjectOld.GetGeneration() == e.ObjectNew.GetGeneration() && oldPolicy.Status.ComplianceState != newPolicy.Status.ComplianceState {
+						return true
+					}
+
+					return false
+				},
+				CreateFunc:  func(ce event.CreateEvent) bool { return false },
+				GenericFunc: func(ge event.GenericEvent) bool { return false },
+				DeleteFunc:  func(de event.DeleteEvent) bool { return false },
+			})).
 		WithOptions(controller.Options{MaxConcurrentReconciles: r.getCGUControllerWorkerCount()}).
 		Complete(r)
 }
